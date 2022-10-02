@@ -17,7 +17,7 @@ from .utils import multiply, get_link_pose, joint_from_name, set_joint_position,
     approximate_as_prism, unit_quat, unit_point, clip, get_joint_info, tform_point, get_yaw, \
     get_pitch, wait_for_user, quat_angle_between, angle_between, quat_from_pose, compute_jacobian, \
     movable_from_joints, quat_from_axis_angle, LockRenderer, Euler, get_links, get_link_name,\
-    draw_point, draw_pose, get_extend_fn, get_moving_links, link_pairs_collision, draw_point, get_link_subtree, \
+    draw_point, draw_pose, link_pairs_collision, draw_point, get_link_subtree, \
     clone_body, get_all_links, set_color, pairwise_collision, tform_point, get_camera_matrix, clip_pixel, \
     ray_from_pixel, pixel_from_ray, dimensions_from_camera_matrix, get_field_of_view, wrap_angle
 
@@ -42,7 +42,7 @@ PR2_GROUPS = {
     'head': ['head_pan_joint', 'head_tilt_joint'],
     arm_from_arm(LEFT_ARM): ['l_shoulder_pan_joint', 'l_shoulder_lift_joint', 'l_upper_arm_roll_joint',
                              'l_elbow_flex_joint', 'l_forearm_roll_joint', 'l_wrist_flex_joint', 'l_wrist_roll_joint'],
-    arm_from_arm(RIGHT_ARM): ['r_shoulder_pan_joint', 'r_shoulder_lift_joint', 'r_upper_arm_roll_joint', 
+    arm_from_arm(RIGHT_ARM): ['r_shoulder_pan_joint', 'r_shoulder_lift_joint', 'r_upper_arm_roll_joint',
                               'r_elbow_flex_joint', 'r_forearm_roll_joint', 'r_wrist_flex_joint', 'r_wrist_roll_joint'],
     gripper_from_arm(LEFT_ARM): ['l_gripper_l_finger_joint', 'l_gripper_r_finger_joint',
                                  'l_gripper_l_finger_tip_joint', 'l_gripper_r_finger_tip_joint'],

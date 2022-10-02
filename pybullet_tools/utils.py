@@ -23,11 +23,6 @@ from contextlib import contextmanager
 
 from .transformations import quaternion_from_matrix, unit_vector, euler_from_quaternion, quaternion_slerp
 
-directory = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(os.path.join(directory, '../motion'))
-from motion_planners.rrt_connect import birrt, direct_path
-#from ..motion.motion_planners.rrt_connect import birrt, direct_path
-
 # from future_builtins import map, filter
 # from builtins import input # TODO - use future
 try:
@@ -956,12 +951,12 @@ def save_image(filename, rgba):
 def get_projection_matrix(width, height, vertical_fov, near, far):
     """
     OpenGL projection matrix
-    :param width: 
-    :param height: 
+    :param width:
+    :param height:
     :param vertical_fov: vertical field of view in radians
-    :param near: 
-    :param far: 
-    :return: 
+    :param near:
+    :param far:
+    :return:
     """
     # http://ksimek.github.io/2013/08/13/intrinsic/
     # http://www.songho.ca/opengl/gl_projectionmatrix.html
@@ -1022,21 +1017,21 @@ def get_image(camera_pos, target_pos, width=640, height=480, vertical_fov=60.0, 
                                    flags=flags,
                                    renderer=renderer,
                                    physicsClientId=CLIENT)[2:]
-    
+
     depth = far * near / (far - (far - near) * d)
     # https://github.com/bulletphysics/bullet3/blob/master/examples/pybullet/examples/pointCloudFromCameraImage.py
     # https://github.com/bulletphysics/bullet3/blob/master/examples/pybullet/examples/getCameraImageTest.py
     segmented = None
     if segment:
         segmented = extract_segmented(seg)
-        
+
     camera_tform = np.reshape(view_matrix, [4, 4])
     camera_tform[:3, 3] = camera_pos
     view_pose = multiply(pose_from_tform(camera_tform), Pose(euler=Euler(roll=PI)))
 
     focal_length = get_focal_lengths(height, vertical_fov) # TODO: horizontal_fov
     camera_matrix = get_camera_matrix(width, height, focal_length)
-    
+
     return CameraImage(rgb, depth, segmented, view_pose, camera_matrix)
 
 def get_image_at_pose(camera_pose, camera_matrix, far=5.0, **kwargs):
@@ -1213,7 +1208,7 @@ def quat_angle_between(quat0, quat1):
     # q1 = unit_vector(quat1[:4])
     # d = clip(np.dot(q0, q1), min_value=-1., max_value=+1.)
     # angle = math.acos(d)
-    
+
     # TODO: angle_between
     delta = p.getDifferenceQuaternion(quat0, quat1)
     d = clip(delta[-1], min_value=-1., max_value=1.)
@@ -2643,50 +2638,6 @@ def batch_ray_collision(rays, threads=1):
         #parentLinkIndex=
         physicsClientId=CLIENT)]
 
-#####################################
-
-# Joint motion planning
-
-def uniform_generator(d):
-    while True:
-        yield np.random.uniform(size=d)
-
-def halton_generator(d):
-    import ghalton
-    seed = random.randint(0, 1000)
-    #sequencer = ghalton.Halton(d)
-    sequencer = ghalton.GeneralizedHalton(d, seed)
-    #sequencer.reset()
-    while True:
-        [weights] = sequencer.get(1)
-        yield np.array(weights)
-
-def unit_generator(d, use_halton=False):
-    if use_halton:
-        try:
-            import ghalton
-        except ImportError:
-            print('ghalton is not installed (https://pypi.org/project/ghalton/)')
-            use_halton = False
-    return halton_generator(d) if use_halton else uniform_generator(d)
-
-def interval_generator(lower, upper, **kwargs):
-    assert len(lower) == len(upper)
-    assert np.less_equal(lower, upper).all()
-    if np.equal(lower, upper).all():
-        return iter([lower])
-    return (weights*lower + (1-weights)*upper for weights in unit_generator(d=len(lower), **kwargs))
-
-def get_sample_fn(body, joints, custom_limits={}, **kwargs):
-    lower_limits, upper_limits = get_custom_limits(body, joints, custom_limits, circular_limits=CIRCULAR_LIMITS)
-    generator = interval_generator(lower_limits, upper_limits, **kwargs)
-    def fn():
-        return tuple(next(generator))
-    return fn
-
-def get_halton_sample_fn(body, joints, **kwargs):
-    return get_sample_fn(body, joints, use_halton=True, **kwargs)
-
 def get_difference_fn(body, joints):
     circular_joints = [is_circular(body, joint) for joint in joints]
 
@@ -2694,358 +2645,6 @@ def get_difference_fn(body, joints):
         return tuple(circular_difference(value2, value1) if circular else (value2 - value1)
                      for circular, value2, value1 in zip(circular_joints, q2, q1))
     return fn
-
-def get_distance_fn(body, joints, weights=None): #, norm=2):
-    # TODO: use the energy resulting from the mass matrix here?
-    if weights is None:
-        weights = 1*np.ones(len(joints)) # TODO: use velocities here
-    difference_fn = get_difference_fn(body, joints)
-    def fn(q1, q2):
-        diff = np.array(difference_fn(q2, q1))
-        return np.sqrt(np.dot(weights, diff * diff))
-        #return np.linalg.norm(np.multiply(weights * diff), ord=norm)
-    return fn
-
-def get_refine_fn(body, joints, num_steps=0):
-    difference_fn = get_difference_fn(body, joints)
-    num_steps = num_steps + 1
-    def fn(q1, q2):
-        q = q1
-        for i in range(num_steps):
-            positions = (1. / (num_steps - i)) * np.array(difference_fn(q2, q)) + q
-            q = tuple(positions)
-            #q = tuple(wrap_positions(body, joints, positions))
-            yield q
-    return fn
-
-def refine_path(body, joints, waypoints, num_steps):
-    refine_fn = get_refine_fn(body, joints, num_steps)
-    refined_path = []
-    for v1, v2 in get_pairs(waypoints):
-        refined_path += list(refine_fn(v1, v2))
-    return refined_path
-
-DEFAULT_RESOLUTION = 0.05
-
-def get_extend_fn(body, joints, resolutions=None, norm=2):
-    # norm = 1, 2, INF
-    if resolutions is None:
-        resolutions = DEFAULT_RESOLUTION*np.ones(len(joints))
-    difference_fn = get_difference_fn(body, joints)
-    def fn(q1, q2):
-        #steps = int(np.max(np.abs(np.divide(difference_fn(q2, q1), resolutions))))
-        steps = int(np.linalg.norm(np.divide(difference_fn(q2, q1), resolutions), ord=norm))
-        refine_fn = get_refine_fn(body, joints, num_steps=steps)
-        return refine_fn(q1, q2)
-    return fn
-
-def remove_redundant(path, tolerance=1e-3):
-    assert path
-    new_path = [path[0]]
-    for conf in path[1:]:
-        difference = np.array(new_path[-1]) - np.array(conf)
-        if not np.allclose(np.zeros(len(difference)), difference, atol=tolerance, rtol=0):
-            new_path.append(conf)
-    return new_path
-
-def waypoints_from_path(path, tolerance=1e-3):
-    path = remove_redundant(path, tolerance=tolerance)
-    if len(path) < 2:
-        return path
-    difference_fn = lambda q2, q1: np.array(q2) - np.array(q1)
-    #difference_fn = get_difference_fn(body, joints)
-
-    waypoints = [path[0]]
-    last_conf = path[1]
-    last_difference = get_unit_vector(difference_fn(last_conf, waypoints[-1]))
-    for conf in path[2:]:
-        difference = get_unit_vector(difference_fn(conf, waypoints[-1]))
-        if not np.allclose(last_difference, difference, atol=tolerance, rtol=0):
-            waypoints.append(last_conf)
-            difference = get_unit_vector(difference_fn(conf, waypoints[-1]))
-        last_conf = conf
-        last_difference = difference
-    waypoints.append(last_conf)
-    return waypoints
-
-def adjust_path(robot, joints, path):
-    start_positions = get_joint_positions(robot, joints)
-    difference_fn = get_difference_fn(robot, joints)
-    differences = [difference_fn(q2, q1) for q1, q2 in get_pairs(path)]
-    adjusted_path = [np.array(start_positions)]
-    for difference in differences:
-        adjusted_path.append(adjusted_path[-1] + difference)
-    return adjusted_path
-
-def get_moving_links(body, joints):
-    moving_links = set()
-    for joint in joints:
-        link = child_link_from_joint(joint)
-        if link not in moving_links:
-            moving_links.update(get_link_subtree(body, link))
-    return list(moving_links)
-
-def get_moving_pairs(body, moving_joints):
-    """
-    Check all fixed and moving pairs
-    Do not check all fixed and fixed pairs
-    Check all moving pairs with a common
-    """
-    moving_links = get_moving_links(body, moving_joints)
-    for link1, link2 in combinations(moving_links, 2):
-        ancestors1 = set(get_joint_ancestors(body, link1)) & set(moving_joints)
-        ancestors2 = set(get_joint_ancestors(body, link2)) & set(moving_joints)
-        if ancestors1 != ancestors2:
-            yield link1, link2
-
-
-def get_self_link_pairs(body, joints, disabled_collisions=set(), only_moving=True):
-    moving_links = get_moving_links(body, joints)
-    fixed_links = list(set(get_links(body)) - set(moving_links))
-    check_link_pairs = list(product(moving_links, fixed_links))
-    if only_moving:
-        check_link_pairs.extend(get_moving_pairs(body, joints))
-    else:
-        check_link_pairs.extend(combinations(moving_links, 2))
-    check_link_pairs = list(filter(lambda pair: not are_links_adjacent(body, *pair), check_link_pairs))
-    check_link_pairs = list(filter(lambda pair: (pair not in disabled_collisions) and
-                                                (pair[::-1] not in disabled_collisions), check_link_pairs))
-    return check_link_pairs
-
-
-def get_collision_fn(body, joints, obstacles, attachments, self_collisions, disabled_collisions,
-                     custom_limits={}, **kwargs):
-    # TODO: convert most of these to keyword arguments
-    check_link_pairs = get_self_link_pairs(body, joints, disabled_collisions) \
-        if self_collisions else []
-    moving_links = frozenset(get_moving_links(body, joints))
-    attached_bodies = [attachment.child for attachment in attachments]
-    moving_bodies = [(body, moving_links)] + attached_bodies
-    #moving_bodies = [body] + [attachment.child for attachment in attachments]
-    check_body_pairs = list(product(moving_bodies, obstacles))  # + list(combinations(moving_bodies, 2))
-    lower_limits, upper_limits = get_custom_limits(body, joints, custom_limits)
-
-    # TODO: maybe prune the link adjacent to the robot
-    # TODO: test self collision with the holding
-    def collision_fn(q):
-        if not all_between(lower_limits, q, upper_limits):
-            #print('Joint limits violated')
-            return True
-        set_joint_positions(body, joints, q)
-        for attachment in attachments:
-            attachment.assign()
-        for link1, link2 in check_link_pairs:
-            # Self-collisions should not have the max_distance parameter
-            if pairwise_link_collision(body, link1, body, link2): #, **kwargs):
-                #print(get_body_name(body), get_link_name(body, link1), get_link_name(body, link2))
-                return True
-        for body1, body2 in check_body_pairs:
-            if pairwise_collision(body1, body2, **kwargs):
-                #print(get_body_name(body1), get_body_name(body2))
-                return True
-        return False
-    return collision_fn
-
-def plan_waypoints_joint_motion(body, joints, waypoints, start_conf=None, obstacles=[], attachments=[],
-                                self_collisions=True, disabled_collisions=set(),
-                                resolutions=None, custom_limits={}, max_distance=MAX_DISTANCE):
-    extend_fn = get_extend_fn(body, joints, resolutions=resolutions)
-    collision_fn = get_collision_fn(body, joints, obstacles, attachments, self_collisions, disabled_collisions,
-                                    custom_limits=custom_limits, max_distance=max_distance)
-    if start_conf is None:
-        start_conf = get_joint_positions(body, joints)
-    else:
-        assert len(start_conf) == len(joints)
-
-    for i, waypoint in enumerate([start_conf] + list(waypoints)):
-        if collision_fn(waypoint):
-            #print("Warning: waypoint configuration {}/{} is in collision".format(i, len(waypoints)))
-            return None
-    path = [start_conf]
-    for waypoint in waypoints:
-        assert len(joints) == len(waypoint)
-        for q in extend_fn(path[-1], waypoint):
-            if collision_fn(q):
-                return None
-            path.append(q)
-    return path
-
-def plan_direct_joint_motion(body, joints, end_conf, **kwargs):
-    return plan_waypoints_joint_motion(body, joints, [end_conf], **kwargs)
-
-def check_initial_end(start_conf, end_conf, collision_fn):
-    if collision_fn(start_conf):
-        print("Warning: initial configuration is in collision")
-        return False
-    if collision_fn(end_conf):
-        print("Warning: end configuration is in collision")
-        return False
-    return True
-
-def plan_joint_motion(body, joints, end_conf, obstacles=[], attachments=[],
-                      self_collisions=True, disabled_collisions=set(),
-                      weights=None, resolutions=None, max_distance=MAX_DISTANCE, custom_limits={}, **kwargs):
-
-    assert len(joints) == len(end_conf)
-    sample_fn = get_sample_fn(body, joints, custom_limits=custom_limits)
-    distance_fn = get_distance_fn(body, joints, weights=weights)
-    extend_fn = get_extend_fn(body, joints, resolutions=resolutions)
-    collision_fn = get_collision_fn(body, joints, obstacles, attachments, self_collisions, disabled_collisions,
-                                    custom_limits=custom_limits, max_distance=max_distance)
-
-    start_conf = get_joint_positions(body, joints)
-
-    if not check_initial_end(start_conf, end_conf, collision_fn):
-        return None
-    return birrt(start_conf, end_conf, distance_fn, sample_fn, extend_fn, collision_fn, **kwargs)
-    #return plan_lazy_prm(start_conf, end_conf, sample_fn, extend_fn, collision_fn)
-
-def plan_lazy_prm(start_conf, end_conf, sample_fn, extend_fn, collision_fn, **kwargs):
-    # TODO: cost metric based on total robot movement (encouraging greater distances possibly)
-    from motion_planners.lazy_prm import lazy_prm
-    path, samples, edges, colliding_vertices, colliding_edges = lazy_prm(
-        start_conf, end_conf, sample_fn, extend_fn, collision_fn, num_samples=200, **kwargs)
-    if path is None:
-        return path
-
-    #lower, upper = get_custom_limits(body, joints, circular_limits=CIRCULAR_LIMITS)
-    def draw_fn(q): # TODO: draw edges instead of vertices
-        return np.append(q[:2], [1e-3])
-        #return np.array([1, 1, 0.25])*(q + np.array([0., 0., np.pi]))
-    handles = []
-    for q1, q2 in get_pairs(path):
-        handles.append(add_line(draw_fn(q1), draw_fn(q2), color=GREEN))
-    for i1, i2 in edges:
-        color = (0, 0, 1)
-        if any(colliding_vertices.get(i, False) for i in (i1, i2)) or colliding_vertices.get((i1, i2), False):
-            color = (1, 0, 0)
-        elif not colliding_vertices.get((i1, i2), True):
-            color = (0, 0, 0)
-        handles.append(add_line(draw_fn(samples[i1]), draw_fn(samples[i2]), color=color))
-    wait_for_user()
-    return path
-
-#####################################
-
-def get_closest_angle_fn(body, joints, linear_weight=1., angular_weight=1., reversible=True):
-    assert len(joints) == 3
-    linear_extend_fn = get_distance_fn(body, joints[:2], weights=linear_weight*np.ones(2))
-    angular_extend_fn = get_distance_fn(body, joints[2:], weights=[angular_weight])
-
-    def closest_fn(q1, q2):
-        angle_and_distance = []
-        for direction in [0, PI] if reversible else [PI]:
-            angle = get_angle(q1[:2], q2[:2]) + direction
-            distance = angular_extend_fn(q1[2:], [angle]) \
-                       + linear_extend_fn(q1[:2], q2[:2]) \
-                       + angular_extend_fn([angle], q2[2:])
-            angle_and_distance.append((angle, distance))
-        return min(angle_and_distance, key=lambda pair: pair[1])
-    return closest_fn
-
-def get_nonholonomic_distance_fn(body, joints, weights=None, **kwargs):
-    assert weights is None
-    closest_angle_fn = get_closest_angle_fn(body, joints, **kwargs)
-
-    def distance_fn(q1, q2):
-        _, distance = closest_angle_fn(q1, q2)
-        return distance
-    return distance_fn
-
-def get_nonholonomic_extend_fn(body, joints, resolutions=None, **kwargs):
-    assert resolutions is None
-    assert len(joints) == 3
-    linear_extend_fn = get_extend_fn(body, joints[:2])
-    angular_extend_fn = get_extend_fn(body, joints[2:])
-    closest_angle_fn = get_closest_angle_fn(body, joints, **kwargs)
-
-    def extend_fn(q1, q2):
-        angle, _ = closest_angle_fn(q1, q2)
-        path = []
-        for aq in angular_extend_fn(q1[2:], [angle]):
-            path.append(np.append(q1[:2], aq))
-        for lq in linear_extend_fn(q1[:2], q2[:2]):
-            path.append(np.append(lq, [angle]))
-        for aq in angular_extend_fn([angle], q2[2:]):
-            path.append(np.append(q2[:2], aq))
-        return path
-    return extend_fn
-
-def plan_nonholonomic_motion(body, joints, end_conf, obstacles=[], attachments=[],
-                             self_collisions=True, disabled_collisions=set(),
-                             weights=None, resolutions=None, reversible=True,
-                             max_distance=MAX_DISTANCE, custom_limits={}, **kwargs):
-
-    assert len(joints) == len(end_conf)
-    sample_fn = get_sample_fn(body, joints, custom_limits=custom_limits)
-    distance_fn = get_nonholonomic_distance_fn(body, joints, weights=weights, reversible=reversible)
-    extend_fn = get_nonholonomic_extend_fn(body, joints, resolutions=resolutions, reversible=reversible)
-    collision_fn = get_collision_fn(body, joints, obstacles, attachments,
-                                    self_collisions, disabled_collisions,
-                                    custom_limits=custom_limits, max_distance=max_distance)
-
-    start_conf = get_joint_positions(body, joints)
-    if not check_initial_end(start_conf, end_conf, collision_fn):
-        return None
-    return birrt(start_conf, end_conf, distance_fn, sample_fn, extend_fn, collision_fn, **kwargs)
-
-#####################################
-
-# SE(2) pose motion planning
-
-def get_base_difference_fn():
-    def fn(q2, q1):
-        dx, dy = np.array(q2[:2]) - np.array(q1[:2])
-        dtheta = circular_difference(q2[2], q1[2])
-        return (dx, dy, dtheta)
-    return fn
-
-def get_base_distance_fn(weights=1*np.ones(3)):
-    difference_fn = get_base_difference_fn()
-    def fn(q1, q2):
-        difference = np.array(difference_fn(q2, q1))
-        return np.sqrt(np.dot(weights, difference * difference))
-    return fn
-
-def plan_base_motion(body, end_conf, base_limits, obstacles=[], direct=False,
-                     weights=1*np.ones(3), resolutions=0.05*np.ones(3),
-                     max_distance=MAX_DISTANCE, **kwargs):
-    def sample_fn():
-        x, y = np.random.uniform(*base_limits)
-        theta = np.random.uniform(*CIRCULAR_LIMITS)
-        return (x, y, theta)
-
-
-    difference_fn = get_base_difference_fn()
-    distance_fn = get_base_distance_fn(weights=weights)
-
-    def extend_fn(q1, q2):
-        steps = np.abs(np.divide(difference_fn(q2, q1), resolutions))
-        n = int(np.max(steps)) + 1
-        q = q1
-        for i in range(n):
-            q = tuple((1. / (n - i)) * np.array(difference_fn(q2, q)) + q)
-            yield q
-            # TODO: should wrap these joints
-
-    def collision_fn(q):
-        # TODO: update this function
-        set_base_values(body, q)
-        return any(pairwise_collision(body, obs, max_distance=max_distance) for obs in obstacles)
-
-    start_conf = get_base_values(body)
-    if collision_fn(start_conf):
-        print("Warning: initial configuration is in collision")
-        return None
-    if collision_fn(end_conf):
-        print("Warning: end configuration is in collision")
-        return None
-    if direct:
-        return direct_path(start_conf, end_conf, extend_fn, collision_fn)
-    return birrt(start_conf, end_conf, distance_fn,
-                 sample_fn, extend_fn, collision_fn, **kwargs)
-
-#####################################
 
 # Placements
 

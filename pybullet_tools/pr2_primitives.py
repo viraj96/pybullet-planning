@@ -16,15 +16,15 @@ from .pr2_utils import TOP_HOLDING_LEFT_ARM, SIDE_HOLDING_LEFT_ARM, GET_GRASPS, 
     learned_pose_generator, PR2_TOOL_FRAMES, get_x_presses, PR2_GROUPS, joints_from_names, \
     is_drake_pr2, get_group_joints, get_group_conf, compute_grasp_width, PR2_GRIPPER_ROOTS
 from .utils import invert, multiply, get_name, set_pose, get_link_pose, is_placement, \
-    pairwise_collision, set_joint_positions, get_joint_positions, sample_placement, get_pose, waypoints_from_path, \
-    unit_quat, plan_base_motion, plan_joint_motion, base_values_from_pose, pose_from_base_values, \
+    pairwise_collision, set_joint_positions, get_joint_positions, sample_placement, get_pose, \
+    unit_quat, base_values_from_pose, pose_from_base_values, \
     uniform_pose_generator, sub_inverse_kinematics, add_fixed_constraint, remove_debug, remove_fixed_constraint, \
     disable_real_time, enable_gravity, joint_controller_hold, get_distance, \
     get_min_limit, user_input, step_simulation, get_body_name, get_bodies, BASE_LINK, \
     add_segments, get_max_limit, link_from_name, BodySaver, get_aabb, Attachment, interpolate_poses, \
-    plan_direct_joint_motion, has_gui, create_attachment, wait_for_duration, get_extend_fn, set_renderer, \
+    has_gui, create_attachment, wait_for_duration, set_renderer, \
     get_custom_limits, all_between, get_unit_vector, wait_for_user, \
-    set_base_values, euler_from_quat, INF, elapsed_time, get_moving_links, flatten_links
+    set_base_values, euler_from_quat, INF, elapsed_time, flatten_links
 
 BASE_EXTENT = 3.5 # 2.5
 BASE_LIMITS = (-BASE_EXTENT*np.ones(2), BASE_EXTENT*np.ones(2))
