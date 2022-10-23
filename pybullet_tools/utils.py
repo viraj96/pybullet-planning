@@ -2638,6 +2638,17 @@ def batch_ray_collision(rays, threads=1):
         #parentLinkIndex=
         physicsClientId=CLIENT)]
 
+def uniform_generator(d):
+    while True:
+        yield np.random.uniform(size=d)
+
+def interval_generator(lower, upper, **kwargs):
+    assert len(lower) == len(upper)
+    assert np.less_equal(lower, upper).all()
+    if np.equal(lower, upper).all():
+        return iter([lower])
+    return (weights*lower + (1-weights)*upper for weights in uniform_generator(d=len(lower), **kwargs))
+
 def get_difference_fn(body, joints):
     circular_joints = [is_circular(body, joint) for joint in joints]
 
