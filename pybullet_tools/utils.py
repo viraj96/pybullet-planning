@@ -2643,6 +2643,7 @@ def uniform_generator(d):
         yield np.random.uniform(size=d)
 
 def interval_generator(lower, upper, **kwargs):
+
     assert len(lower) == len(upper)
     assert np.less_equal(lower, upper).all()
     if np.equal(lower, upper).all():
